@@ -3,12 +3,7 @@ local vim = vim
 
 require('tmux-test').setup()
 
--- <leader>LRのキーマッピングを設定（読み取り専用）
-vim.keymap.set('n', '<leader>LR', function()
-  require('tmux-test').show_tmux_session()
-end, { desc = 'Show tmux session in floating window (read-only)' })
-
--- <leader>LIのキーマッピングを設定（インタラクティブ）
-vim.keymap.set('n', '<leader>LI', function()
-  require('tmux-test').show_tmux_interactive()
-end, { desc = 'Show tmux session in floating window (interactive)' })
+-- mのキーマッピングを設定（10個のセッション表示）
+vim.keymap.set('n', 'm', function()
+  require('tmux-test').show_multiple_sessions()
+end, { desc = 'Show 10 tmux sessions in grid layout' })

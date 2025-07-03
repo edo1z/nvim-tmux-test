@@ -3,101 +3,86 @@ local vim = vim
 
 local M = {}
 
-function M.show_tmux_session()
-  local session_name = "nvim-tmux-test"
-  -- tmuxセッションが存在するかチェック
-  local check_cmd = string.format("tmux has-session -t %s 2>/dev/null", session_name)
-  vim.fn.system(check_cmd)
-  -- セッションが存在しない場合は作成
-  if vim.v.shell_error ~= 0 then
-    local create_cmd = string.format("tmux new-session -d -s %s", session_name)
-    vim.fn.system(create_cmd)
-  end
-  -- セッションでclaude codeを実行
-  local send_cmd = string.format("tmux send-keys -t %s 'claude' C-m", session_name)
-  vim.fn.system(send_cmd)
-  -- 少し待機してから出力を取得
-  vim.cmd("sleep 100m")
-  -- セッションの内容を取得
-  local capture_cmd = string.format("tmux capture-pane -t %s -p", session_name)
-  local output = vim.fn.system(capture_cmd)
-  -- フローティングウィンドウの設定
-  local width = math.floor(vim.o.columns * 0.8)
-  local height = math.floor(vim.o.lines * 0.8)
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
-  local buf = vim.api.nvim_create_buf(false, true)
-  -- バッファに内容を設定
-  local lines = vim.split(output, '\n')
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  -- フローティングウィンドウを作成
-  local win_opts = {
-    relative = 'editor',
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = 'minimal',
-    border = 'rounded',
-    title = ' tmux: ' .. session_name .. ' ',
-    title_pos = 'center',
-  }
-  local win = vim.api.nvim_open_win(buf, true, win_opts)
-  -- バッファとウィンドウのオプション設定
-  vim.api.nvim_buf_set_option(buf, 'modifiable', false)
-  vim.api.nvim_buf_set_option(buf, 'buftype', 'nofile')
-  vim.api.nvim_win_set_option(win, 'wrap', false)
-  -- qキーでウィンドウを閉じる
-  vim.api.nvim_buf_set_keymap(buf, 'n', 'q', ':close<CR>', { noremap = true, silent = true })
-  -- Escキーでもウィンドウを閉じる
-  vim.api.nvim_buf_set_keymap(buf, 'n', '<Esc>', ':close<CR>', { noremap = true, silent = true })
-end
+-- グローバル変数でウィンドウを管理
+M.floating_windows = {}
 
-function M.show_tmux_interactive()
-  local session_name = "nvim-tmux-test"
-  -- tmuxセッションが存在するかチェック
-  local check_cmd = string.format("tmux has-session -t %s 2>/dev/null", session_name)
-  vim.fn.system(check_cmd)
-  -- セッションが存在しない場合は作成してclaude codeを実行
-  if vim.v.shell_error ~= 0 then
-    local create_cmd = string.format("tmux new-session -d -s %s 'claude'", session_name)
-    vim.fn.system(create_cmd)
+function M.show_multiple_sessions()
+  -- 既存のフローティングウィンドウをクリア
+  for _, win in ipairs(M.floating_windows) do
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
   end
-  -- フローティングウィンドウの設定
-  local width = math.floor(vim.o.columns * 0.8)
-  local height = math.floor(vim.o.lines * 0.8)
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
-  local buf = vim.api.nvim_create_buf(false, true)
-  -- フローティングウィンドウを作成
-  local win_opts = {
-    relative = 'editor',
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = 'minimal',
-    border = 'rounded',
-    title = ' tmux: ' .. session_name .. ' (interactive) ',
-    title_pos = 'center',
-  }
-  local win = vim.api.nvim_open_win(buf, true, win_opts)
-  -- ターミナルモードでtmuxアタッチ
-  local attach_cmd = string.format("tmux attach-session -t %s", session_name)
-  vim.fn.termopen(attach_cmd)
-  vim.cmd("startinsert")
-  -- Terminal-Normalモードでのキーマップ追加
-  vim.api.nvim_buf_set_keymap(buf, 'n', 'q', ':close<CR>',
-    { noremap = true, silent = true })
-  -- ターミナルモードから直接閉じるキーマップ
-  vim.api.nvim_buf_set_keymap(buf, 't', '<C-q>', '<C-\\><C-n>:close<CR>',
-    { noremap = true, silent = true })
+  M.floating_windows = {}
+  
+  -- 10個のセッション名
+  local sessions = {}
+  for i = 1, 10 do
+    table.insert(sessions, "claude" .. i)
+  end
+  
+  -- 各セッションの作成
+  for _, session_name in ipairs(sessions) do
+    local check_cmd = string.format("tmux has-session -t %s 2>/dev/null", session_name)
+    vim.fn.system(check_cmd)
+    if vim.v.shell_error ~= 0 then
+      local create_cmd = string.format("tmux new-session -d -s %s", session_name)
+      vim.fn.system(create_cmd)
+    end
+  end
+  
+  -- ウィンドウレイアウト計算（2行5列）
+  local total_width = vim.o.columns
+  local total_height = vim.o.lines
+  local cols_count = 5
+  local rows_count = 2
+  local win_width = math.floor(total_width / cols_count) - 1
+  local win_height = math.floor(total_height / rows_count) - 2
+  
+  -- 各セッションのウィンドウを作成
+  for idx, session_name in ipairs(sessions) do
+    local row_idx = math.floor((idx - 1) / cols_count)
+    local col_idx = (idx - 1) % cols_count
+    local row = row_idx * (win_height + 1)
+    local col = col_idx * (win_width + 1)
+    
+    local buf = vim.api.nvim_create_buf(false, true)
+    local win_opts = {
+      relative = 'editor',
+      width = win_width,
+      height = win_height,
+      row = row,
+      col = col,
+      style = 'minimal',
+      border = 'single',
+      title = ' ' .. session_name .. ' ',
+      title_pos = 'center',
+    }
+    local win = vim.api.nvim_open_win(buf, false, win_opts)
+    table.insert(M.floating_windows, win)
+
+    -- ターミナルモードでtmuxアタッチ
+    vim.api.nvim_win_call(win, function()
+      local attach_cmd = string.format("tmux attach-session -t %s", session_name)
+      vim.fn.termopen(attach_cmd)
+    end)
+
+    -- キーマップ設定
+    vim.api.nvim_buf_set_keymap(buf, 'n', 'q', ':close<CR>',
+      { noremap = true, silent = true })
+    vim.api.nvim_buf_set_keymap(buf, 't', '<C-q>', '<C-\\><C-n>:close<CR>',
+      { noremap = true, silent = true })
+  end
+
+  -- 最初のウィンドウにフォーカス
+  if #M.floating_windows > 0 then
+    vim.api.nvim_set_current_win(M.floating_windows[1])
+  end
 end
 
 function M.setup()
   -- コマンド登録
-  vim.api.nvim_create_user_command('TmuxTest', M.show_tmux_session, {})
-  vim.api.nvim_create_user_command('TmuxTestInteractive', M.show_tmux_interactive, {})
+  vim.api.nvim_create_user_command('TmuxMultiple', M.show_multiple_sessions, {})
 end
 
 return M
