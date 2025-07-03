@@ -53,9 +53,51 @@ function M.show_tmux_session()
   vim.api.nvim_buf_set_keymap(buf, 'n', '<Esc>', ':close<CR>', { noremap = true, silent = true })
 end
 
+function M.show_tmux_interactive()
+  local session_name = "nvim-tmux-test"
+  -- tmuxセッションが存在するかチェック
+  local check_cmd = string.format("tmux has-session -t %s 2>/dev/null", session_name)
+  vim.fn.system(check_cmd)
+  -- セッションが存在しない場合は作成
+  if vim.v.shell_error ~= 0 then
+    local create_cmd = string.format("tmux new-session -d -s %s", session_name)
+    vim.fn.system(create_cmd)
+  end
+  -- フローティングウィンドウの設定
+  local width = math.floor(vim.o.columns * 0.8)
+  local height = math.floor(vim.o.lines * 0.8)
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+  local buf = vim.api.nvim_create_buf(false, true)
+  -- フローティングウィンドウを作成
+  local win_opts = {
+    relative = 'editor',
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    style = 'minimal',
+    border = 'rounded',
+    title = ' tmux: ' .. session_name .. ' (interactive) ',
+    title_pos = 'center',
+  }
+  local win = vim.api.nvim_open_win(buf, true, win_opts)
+  -- ターミナルモードでtmuxアタッチ
+  local attach_cmd = string.format("tmux attach-session -t %s", session_name)
+  vim.fn.termopen(attach_cmd)
+  vim.cmd("startinsert")
+  -- Terminal-Normalモードでのキーマップ追加
+  vim.api.nvim_buf_set_keymap(buf, 'n', 'q', ':close<CR>',
+    { noremap = true, silent = true })
+  -- ターミナルモードから直接閉じるキーマップ
+  vim.api.nvim_buf_set_keymap(buf, 't', '<C-q>', '<C-\\><C-n>:close<CR>',
+    { noremap = true, silent = true })
+end
+
 function M.setup()
   -- コマンド登録
   vim.api.nvim_create_user_command('TmuxTest', M.show_tmux_session, {})
+  vim.api.nvim_create_user_command('TmuxTestInteractive', M.show_tmux_interactive, {})
 end
 
 return M
