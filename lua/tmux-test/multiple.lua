@@ -107,9 +107,12 @@ local function find_buffer_by_name(name)
     if vim.api.nvim_buf_is_valid(buf) then
       local buf_name = vim.api.nvim_buf_get_name(buf)
       local is_loaded = vim.api.nvim_buf_is_loaded(buf)
-      vim.notify(string.format("DEBUG: buf %d, name='%s', loaded=%s", buf, buf_name, tostring(is_loaded)))
-      if buf_name == name and is_loaded then
-        vim.notify(string.format("DEBUG: Found matching buffer %d", buf))
+      local is_terminal = vim.api.nvim_buf_get_option(buf, 'buftype') == 'terminal'
+      vim.notify(string.format("DEBUG: buf %d, name='%s', loaded=%s, terminal=%s", buf, buf_name, tostring(is_loaded), tostring(is_terminal)))
+      
+      -- ターミナルバッファの場合、名前の末尾でマッチング
+      if is_terminal and is_loaded and buf_name:match(name .. "$") then
+        vim.notify(string.format("DEBUG: Found matching terminal buffer %d", buf))
         return buf
       end
     end
@@ -129,6 +132,9 @@ local function setup_session_in_window(session_name, window_id)
     -- 新しいバッファを作成
     vim.api.nvim_win_call(window_id, function()
       vim.cmd('enew')
+      local buf_before = vim.api.nvim_get_current_buf()
+      local name_before = vim.api.nvim_buf_get_name(buf_before)
+      vim.notify(string.format("DEBUG: After enew - buf=%d, name='%s'", buf_before, name_before))
       
       -- new-session -Aオプションを使用
       local attach_cmd = string.format("tmux new-session -A -s %s", session_name)
@@ -142,8 +148,9 @@ local function setup_session_in_window(session_name, window_id)
       -- 自動コマンドを復元
       vim.o.eventignore = eventignore_save
       
-      -- バッファ名を設定
-      pcall(vim.api.nvim_buf_set_name, 0, session_name)
+      local buf_after = vim.api.nvim_get_current_buf()
+      local name_after = vim.api.nvim_buf_get_name(buf_after)
+      vim.notify(string.format("DEBUG: After termopen - buf=%d, name='%s'", buf_after, name_after))
       
       -- バッファローカルなキーマップ
       local buf = vim.api.nvim_get_current_buf()
