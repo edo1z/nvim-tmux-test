@@ -32,11 +32,10 @@ end
 
 -- グリッドレイアウトを作成
 local function create_grid_layout(rows, cols)
-  -- 最初のウィンドウはすでに存在
+  -- 最初のウィンドウはすでに存在（tabnewで作成された無名バッファを持つ）
   local windows = {vim.api.nvim_get_current_win()}
   
-  -- 最初のウィンドウも新規バッファにする
-  vim.cmd('enew')
+  -- 注意: 最初のウィンドウはそのまま使用（tabnewの無名バッファを再利用）
   
   -- 行を作成
   for row = 2, rows do
@@ -127,6 +126,7 @@ local function setup_session_in_window(session_name, window_id)
   
   if existing_buf then
     -- 既存バッファを使用
+    vim.notify(string.format("DEBUG: Reusing buffer %d for %s in window %d", existing_buf, session_name, window_id))
     
     -- ウィンドウに設定する前に、現在のバッファが無名バッファか確認
     local current_buf = vim.api.nvim_win_get_buf(window_id)
@@ -139,7 +139,15 @@ local function setup_session_in_window(session_name, window_id)
       pcall(vim.api.nvim_buf_delete, current_buf, { force = true })
     end
     
+    -- バッファの状態を確認
+    local ok, job_id = pcall(vim.api.nvim_buf_get_var, existing_buf, 'terminal_job_id')
+    if ok and job_id then
+      vim.notify(string.format("  Buffer state: job_id=%d", job_id))
+    else
+      vim.notify("  Buffer state: no job_id found")
+    end
   else
+    vim.notify(string.format("DEBUG: Creating new buffer for %s in window %d", session_name, window_id))
     -- 新しいバッファを作成
     vim.api.nvim_win_call(window_id, function()
       vim.cmd('enew')
@@ -243,6 +251,41 @@ function M.show_normal()
     end
   end
   
+  -- 余剰ウィンドウを閉じる
+  if #windows > #sessions then
+    -- 最後のウィンドウから順に閉じる（レイアウトへの影響を最小化）
+    for i = #windows, #sessions + 1, -1 do
+      -- ウィンドウのバッファを取得
+      local buf = vim.api.nvim_win_get_buf(windows[i])
+      -- ウィンドウを閉じる
+      vim.api.nvim_win_close(windows[i], true)
+      -- バッファも削除（無名バッファの場合のみ）
+      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_name(buf) == "" then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
+    end
+  end
+  
+  -- デバッグ：セッションの状態を確認
+  vim.notify("DEBUG: Checking session availability after setup:")
+  vim.cmd('wincmd t')  -- 左上に移動
+  for i = 1, #sessions do
+    local session_name = sessions[i]
+    -- tmuxセッションが実際に存在するか確認
+    local check_cmd = string.format("tmux has-session -t %s 2>&1", session_name)
+    local result = vim.fn.system(check_cmd)
+    local exists = vim.v.shell_error == 0
+    
+    -- 現在のウィンドウでセッションにアタッチできるか試す
+    if i <= #windows then
+      vim.fn.win_gotoid(windows[i])
+      local buf = vim.api.nvim_win_get_buf(windows[i])
+      local buf_name = vim.api.nvim_buf_get_name(buf)
+      vim.notify(string.format("  %s: tmux_exists=%s, window=%d, buf=%d", 
+        session_name, tostring(exists), windows[i], buf))
+    end
+  end
+
   -- 左上のウィンドウに戻る
   vim.cmd('wincmd t')
 
@@ -251,14 +294,15 @@ end
 
 -- 個別ウィンドウモードを開く
 function M.open_individual(session_name)
+  vim.notify(string.format("DEBUG: open_individual called for %s", session_name))
+  
+  -- 現在のタブとウィンドウの状態を確認
+  local current_tab = vim.fn.tabpagenr()
+  vim.notify(string.format("DEBUG: Current tab=%d, tmux_tab=%s", current_tab, tostring(M.tmux_tab)))
   
   -- 既に同じセッションの個別ウィンドウが開いているか確認
   if M.individual_session == session_name then
-    
-    -- tmuxタブが開いている場合は閉じる
-    if M.tmux_tab and M.is_normal_open then
-      M.close_normal()
-    end
+    vim.notify("DEBUG: Individual session already set for " .. session_name)
     
     -- 元のタブを確認
     if M.original_tab then
@@ -271,6 +315,7 @@ function M.open_individual(session_name)
         local buf_name = vim.api.nvim_buf_get_name(buf)
         -- (individual)が付いているバッファを探す
         if buf_name:match(session_name .. " %(individual%)") then
+          vim.notify("DEBUG: Found existing individual window")
           vim.api.nvim_set_current_win(win)
           return
         end
@@ -310,7 +355,15 @@ function M.open_individual(session_name)
   -- ターミナルを開く
   -- 注意：attach-sessionではなくnew-session -Aを使用（一貫性のため）
   local attach_cmd = string.format("tmux new-session -A -s %s", session_name)
+  vim.notify(string.format("DEBUG: Opening individual window with: %s", attach_cmd))
   local job_id = vim.fn.termopen(attach_cmd)
+  
+  -- セッションの状態を確認
+  vim.defer_fn(function()
+    local check_cmd = string.format("tmux list-clients -t %s 2>&1", session_name)
+    local clients = vim.fn.system(check_cmd)
+    vim.notify(string.format("DEBUG: Clients attached to %s: %s", session_name, vim.trim(clients)))
+  end, 1000)
   
   -- バッファ名を設定（エラーを回避）
   pcall(vim.api.nvim_buf_set_name, 0, session_name .. " (individual)")
@@ -328,6 +381,9 @@ function M.open_individual(session_name)
   vim.wo.number = false
   vim.wo.relativenumber = false
   vim.wo.signcolumn = 'no'
+
+  -- インサートモードに入る
+  vim.cmd("startinsert")
 end
 
 -- 個別ウィンドウモードを閉じる
