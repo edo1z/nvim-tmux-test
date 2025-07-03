@@ -13,8 +13,8 @@ function M.show_tmux_session()
     local create_cmd = string.format("tmux new-session -d -s %s", session_name)
     vim.fn.system(create_cmd)
   end
-  -- セッションでecho 1234を実行
-  local send_cmd = string.format("tmux send-keys -t %s 'echo 1234' C-m", session_name)
+  -- セッションでclaude codeを実行
+  local send_cmd = string.format("tmux send-keys -t %s 'claude' C-m", session_name)
   vim.fn.system(send_cmd)
   -- 少し待機してから出力を取得
   vim.cmd("sleep 100m")
@@ -58,9 +58,9 @@ function M.show_tmux_interactive()
   -- tmuxセッションが存在するかチェック
   local check_cmd = string.format("tmux has-session -t %s 2>/dev/null", session_name)
   vim.fn.system(check_cmd)
-  -- セッションが存在しない場合は作成
+  -- セッションが存在しない場合は作成してclaude codeを実行
   if vim.v.shell_error ~= 0 then
-    local create_cmd = string.format("tmux new-session -d -s %s", session_name)
+    local create_cmd = string.format("tmux new-session -d -s %s 'claude'", session_name)
     vim.fn.system(create_cmd)
   end
   -- フローティングウィンドウの設定
