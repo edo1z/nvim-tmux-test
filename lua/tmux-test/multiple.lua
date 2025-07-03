@@ -20,13 +20,16 @@ end
 
 -- セッションの作成
 local function ensure_sessions_exist(sessions)
-  for _, session_name in ipairs(sessions) do
+  for idx, session_name in ipairs(sessions) do
     local check_cmd = string.format("tmux has-session -t %s 2>/dev/null", session_name)
     vim.fn.system(check_cmd)
     if vim.v.shell_error ~= 0 then
       local create_cmd = string.format("tmux new-session -d -s %s", session_name)
       vim.fn.system(create_cmd)
     end
+    -- ウィンドウ名を設定
+    local rename_cmd = string.format("tmux rename-window -t %s:0 'Claude%d'", session_name, idx)
+    vim.fn.system(rename_cmd)
   end
 end
 
@@ -102,7 +105,8 @@ function M.show_floating()
 
     -- ターミナルモードでtmuxアタッチ
     vim.api.nvim_win_call(win, function()
-      local attach_cmd = string.format("tmux attach-session -t %s", session_name)
+      -- new-session -Aオプションを使用（既存セッションにアタッチ、なければ作成）
+    local attach_cmd = string.format("tmux new-session -A -s %s", session_name)
       vim.fn.termopen(attach_cmd)
     end)
 
@@ -182,45 +186,106 @@ function M.show_normal()
   vim.cmd('only')
 
   -- 2行5列のレイアウトを作成
-  -- まず横に5つ分割
+  -- まず2行に分割
+  vim.cmd('split')
+  
+  -- 上段（1-5）を作成
+  vim.cmd('wincmd k')  -- 上に移動
   for i = 1, 4 do
     vim.cmd('vsplit')
   end
-
-  -- 各列を2行に分割
+  
+  -- 下段（6-10）を作成
+  vim.cmd('wincmd j')  -- 下に移動
+  for i = 1, 4 do
+    vim.cmd('vsplit')
+  end
+  
+  -- ウィンドウサイズを均等に
+  vim.cmd('wincmd =')
+  
+  -- ウィンドウ数を確認
+  local win_count = #vim.api.nvim_list_wins()
+  vim.notify(string.format("Total windows created: %d", win_count))
+  
+  -- 各ウィンドウでtmuxセッションを開く（上段から順に）
   vim.cmd('wincmd t')  -- 左上に移動
-  for col = 1, 5 do
-    vim.cmd('split')
-    if col < 5 then
-      vim.cmd('wincmd l')  -- 次の列の上段へ
+  
+  -- 上段（claude1-5）
+  for i = 1, 5 do
+    local session_name = sessions[i]
+    local current_win = vim.api.nvim_get_current_win()
+    vim.notify(string.format("Processing %s in window %d", session_name, current_win))
+    
+    -- 新しいバッファを作成してからターミナルを開く
+    vim.cmd('enew')
+    -- new-session -Aオプションを使用（既存セッションにアタッチ、なければ作成）
+    local attach_cmd = string.format("tmux new-session -A -s %s", session_name)
+    local job_id = vim.fn.termopen(attach_cmd)
+    
+    -- バッファ名を設定（タブに表示される）
+    vim.api.nvim_buf_set_name(0, session_name)
+    
+    -- バッファローカルなキーマップ
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_keymap(buf, 't', '<C-q>', '<C-\\><C-n>:q<CR>',
+      { noremap = true, silent = true })
+    
+    -- 行番号を非表示に
+    vim.wo.number = false
+    vim.wo.relativenumber = false
+    vim.wo.signcolumn = 'no'
+    
+    if i < 5 then
+      vim.cmd('wincmd l')  -- 右へ移動
+      -- 短い遅延を追加
+      vim.wait(50)
     end
   end
-
-  -- 各ウィンドウでtmuxセッションを開く
+  
+  -- 下段へ移動（claude6-10）
+  -- 左上に戻ってから下に移動することで確実に左下に移動
   vim.cmd('wincmd t')  -- 左上に移動
-  local win_idx = 1
-
-  for row = 1, 2 do
-    for col = 1, 5 do
-      local session_name = sessions[win_idx]
-      if session_name then
-        -- 新しいバッファを作成してからターミナルを開く
-        vim.cmd('enew')
-        local attach_cmd = string.format("tmux attach-session -t %s", session_name)
-        vim.fn.termopen(attach_cmd)
-
-        -- バッファローカルなキーマップ
-        local buf = vim.api.nvim_get_current_buf()
-        vim.api.nvim_buf_set_keymap(buf, 't', '<C-q>', '<C-\\><C-n>:q<CR>',
-          { noremap = true, silent = true })
-      end
-
-      win_idx = win_idx + 1
-
-      -- 次のウィンドウへ移動
-      if win_idx <= 10 then
-        vim.cmd('wincmd w')
-      end
+  vim.cmd('wincmd j')  -- 下に移動（左下へ）
+  -- 現在のウィンドウIDを確認
+  local initial_win = vim.api.nvim_get_current_win()
+  vim.notify(string.format("Initial window for bottom row: %d", initial_win))
+  
+  for i = 6, 10 do
+    local session_name = sessions[i]
+    local current_win = vim.api.nvim_get_current_win()
+    vim.notify(string.format("Processing %s in window %d", session_name, current_win))
+    
+    -- 新しいバッファを作成してからターミナルを開く
+    vim.cmd('enew')
+    -- new-session -Aオプションを使用（既存セッションにアタッチ、なければ作成）
+    local attach_cmd = string.format("tmux new-session -A -s %s", session_name)
+    local job_id = vim.fn.termopen(attach_cmd)
+    
+    -- デバッグ情報を出力
+    if job_id <= 0 then
+      vim.notify(string.format("ERROR: Session %s failed to start! job_id=%s", session_name, tostring(job_id)), vim.log.levels.ERROR)
+    else
+      vim.notify(string.format("Session %s: job_id=%s", session_name, tostring(job_id)))
+    end
+    
+    -- バッファ名を設定
+    vim.api.nvim_buf_set_name(0, session_name)
+    
+    -- バッファローカルなキーマップ
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_keymap(buf, 't', '<C-q>', '<C-\\><C-n>:q<CR>',
+      { noremap = true, silent = true })
+    
+    -- 行番号を非表示に
+    vim.wo.number = false
+    vim.wo.relativenumber = false
+    vim.wo.signcolumn = 'no'
+    
+    if i < 10 then
+      vim.cmd('wincmd l')  -- 右へ移動
+      -- 短い遅延を追加
+      vim.wait(50)
     end
   end
 
